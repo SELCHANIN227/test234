@@ -16,7 +16,8 @@ jobs:
       - name: Decode application source
         shell: pwsh
         run: |
-          $bytes = [Convert]::FromBase64String((Get-Content app.b64 -Raw))
+          $base64 = (Get-ChildItem parts/app.part.* | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
+          $bytes = [Convert]::FromBase64String($base64)
           [IO.File]::WriteAllBytes("app.zip", $bytes)
           Expand-Archive app.zip -DestinationPath app-src
       - name: Download official Electron
