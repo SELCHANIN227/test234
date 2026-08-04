@@ -12,29 +12,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch DIKIDI page and pagination
+      - name: Fetch DIKIDI new and old sorting
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force diagnostics | Out-Null
           $headers = @{"User-Agent"="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36";"Accept-Language"="ru-RU,ru;q=0.9";"X-Requested-With"="XMLHttpRequest"}
           $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-          $url = "https://dikidi.ru/porxaimilaya?p=1.pi-pr&o=8"
-          $response = Invoke-WebRequest -Uri $url -MaximumRedirection 10 -Headers $headers -WebSession $session
-          $response.Content | Set-Content -Encoding UTF8 diagnostics/page.html
-          @{status=[int]$response.StatusCode; finalUrl=$response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri; length=$response.Content.Length} | ConvertTo-Json | Set-Content -Encoding UTF8 diagnostics/page.json
-          $filters = [uri]::EscapeDataString('{"reviews_list_sort_rating":"date_desc","reviews_list_only_photo":false,"reviews_list_sort":"date_desc","is_master":0}')
-          foreach ($offset in 0,5,10,15,20,25,30,35,40,45,50) {
-            $purl = "https://dikidi.ru/ajax/profile/reviews_pagination/?company=831212&offset=$offset&rating=0&filters=$filters"
+          $pageUrl = "https://dikidi.ru/porxaimilaya?p=1.pi-pr&o=8"
+          $page = Invoke-WebRequest -Uri $pageUrl -MaximumRedirection 10 -Headers $headers -WebSession $session
+          $page.Content | Set-Content -Encoding UTF8 diagnostics/page.html
+          foreach ($sort in 'date_desc','date_asc','data_positive','data_negative') {
+            $url = "https://dikidi.ru/ru/ajax/profile/reviews/?company=831212&reviews_list_sort_rating=date_desc&reviews_list_employee_id=0&reviews_list_sort=$sort&reviews_list_only_photo=0&is_master=0"
             try {
-              $p = Invoke-WebRequest -Uri $purl -Headers $headers -WebSession $session -MaximumRedirection 5
-              $p.Content | Set-Content -Encoding UTF8 "diagnostics/pagination-$offset.html"
-              @{offset=$offset;status=[int]$p.StatusCode;length=$p.Content.Length;contentType=$p.Headers.'Content-Type'} | ConvertTo-Json | Set-Content -Encoding UTF8 "diagnostics/pagination-$offset.json"
-            } catch {
-              @{offset=$offset;error=$_.Exception.Message;response=$_.ErrorDetails.Message} | ConvertTo-Json | Set-Content -Encoding UTF8 "diagnostics/pagination-$offset.json"
-            }
+              $r = Invoke-WebRequest -Uri $url -Headers $headers -WebSession $session -MaximumRedirection 5
+              $r.Content | Set-Content -Encoding UTF8 "diagnostics/filter-$sort.json"
+            } catch { $_.ErrorDetails.Message | Set-Content -Encoding UTF8 "diagnostics/filter-$sort-error.txt" }
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: dikidi-electron-diagnostics
+          name: dikidi-sort-diagnostics
           path: diagnostics
           if-no-files-found: error
