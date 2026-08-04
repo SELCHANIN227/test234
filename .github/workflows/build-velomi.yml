@@ -1,0 +1,39 @@
+name: Build Velomi Windows
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode application source
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String((Get-Content app.b64 -Raw))
+          [IO.File]::WriteAllBytes("app.zip", $bytes)
+          Expand-Archive app.zip -DestinationPath app-src
+      - name: Download official Electron
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/electron/electron/releases/download/v43.2.0/electron-v43.2.0-win32-x64.zip" -OutFile electron.zip
+          Expand-Archive electron.zip -DestinationPath dist
+      - name: Assemble portable application
+        shell: pwsh
+        run: |
+          Remove-Item dist/resources/default_app.asar -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force dist/resources/app | Out-Null
+          Copy-Item app-src/* -Destination dist/resources/app -Recurse -Force
+          Rename-Item dist/electron.exe "Velomi Review Importer.exe"
+          Compress-Archive -Path dist/* -DestinationPath "Velomi-Review-Importer-Windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Velomi-Review-Importer-Windows-x64
+          path: Velomi-Review-Importer-Windows-x64.zip
+          if-no-files-found: error
