@@ -1,0 +1,69 @@
+name: Diagnose DIKIDI Electron
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Electron
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/electron/electron/releases/download/v43.2.0/electron-v43.2.0-win32-x64.zip" -OutFile electron.zip
+          Expand-Archive electron.zip -DestinationPath electron
+      - name: Create diagnostic app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force diag | Out-Null
+          @'
+          {"name":"diag","version":"1.0.0","main":"main.js"}
+          '@ | Set-Content -Encoding UTF8 diag/package.json
+          @'
+          const { app, BrowserWindow, session } = require('electron');
+          const fs = require('fs');
+          const path = require('path');
+          const target = 'https://dikidi.ru/porxaimilaya?p=1.pi-pr&o=8';
+          const out = path.join(process.cwd(), 'diagnostics');
+          fs.mkdirSync(out, { recursive: true });
+          const log = [];
+          function push(type, data={}) { log.push({ t:new Date().toISOString(), type, ...data }); fs.writeFileSync(path.join(out,'log.json'), JSON.stringify(log,null,2)); }
+          app.commandLine.appendSwitch('disable-gpu');
+          app.commandLine.appendSwitch('no-sandbox');
+          app.whenReady().then(async () => {
+            const ses = session.fromPartition('persist:diag-dikidi', { cache: false });
+            ses.webRequest.onCompleted((d)=> { if (d.resourceType === 'mainFrame' || /review|profile|dikidi/i.test(d.url)) push('request-complete',{url:d.url,status:d.statusCode,type:d.resourceType}); });
+            const win = new BrowserWindow({width:1200,height:900,show:false,webPreferences:{session:ses,contextIsolation:true,nodeIntegration:false,sandbox:true,javascript:true,images:true}});
+            win.webContents.on('did-start-loading',()=>push('did-start-loading'));
+            win.webContents.on('did-stop-loading',()=>push('did-stop-loading',{url:win.webContents.getURL()}));
+            win.webContents.on('did-finish-load',()=>push('did-finish-load',{url:win.webContents.getURL(),title:win.webContents.getTitle()}));
+            win.webContents.on('did-fail-load',(_e,code,desc,url,isMain)=>push('did-fail-load',{code,desc,url,isMain}));
+            win.webContents.on('console-message',(_e,level,message,line,sourceId)=>push('console',{level,message,line,sourceId}));
+            try { await win.loadURL(target); push('loadURL-resolved',{url:win.webContents.getURL()}); } catch(e) { push('loadURL-error',{message:e.message,stack:e.stack}); }
+            await new Promise(r=>setTimeout(r,15000));
+            try {
+              const snap = await win.webContents.executeJavaScript(`({href:location.href,title:document.title,readyState:document.readyState,text:(document.body?.innerText||'').slice(0,20000),textLength:(document.body?.innerText||'').length,htmlLength:(document.documentElement?.outerHTML||'').length,bodyChildren:document.body?.childElementCount||0,frames:[...document.querySelectorAll('iframe')].map(x=>x.src)})`, true);
+              push('snapshot',snap);
+              fs.writeFileSync(path.join(out,'snapshot.json'),JSON.stringify(snap,null,2));
+              const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML', true);
+              fs.writeFileSync(path.join(out,'page.html'),html);
+              const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(out,'page.png'),img.toPNG());
+            } catch(e) { push('snapshot-error',{message:e.message,stack:e.stack}); }
+            app.quit();
+          });
+          setTimeout(()=>{ push('hard-timeout'); app.exit(2); },60000);
+          '@ | Set-Content -Encoding UTF8 diag/main.js
+      - name: Run diagnostic
+        shell: pwsh
+        run: |
+          & ".\electron\electron.exe" ".\diag"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dikidi-electron-diagnostics
+          path: diagnostics
+          if-no-files-found: error
