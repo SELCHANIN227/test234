@@ -1,2 +1,1 @@
-DIKIDI diagnostic run 2026-08-04
-third run: public pagination endpoint
+DIKIDI sorting diagnostic run 2026-08-04 v3
